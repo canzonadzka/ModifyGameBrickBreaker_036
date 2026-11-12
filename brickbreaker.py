@@ -657,3 +657,323 @@ def makeLevel(level):
 DEBRIS_COLORS = {"brick": (200, 80, 20), "question": (250, 185, 50),
                  "hard": (140, 140, 150)}
 POINTS = {"brick": 10, "question": 50, "hard": 30}
+
+# -------------------------------------------------------------------- game
+class Game:
+    def __init__(self):
+        self.running = True
+        self.state = "start"  # start, playing, paused, gameover
+        self.highScore = loadHighScore()
+        self.muted = False
+        self.canvas = pygame.Surface((WIDTH, HEIGHT))
+        self.clouds = [[60, 60, 0.25, SPR["clouds"][0]],
+                       [260, 95, 0.18, SPR["clouds"][1]],
+                       [430, 50, 0.30, SPR["clouds"][0]],
+                       [530, 140, 0.22, SPR["clouds"][1]]]
+        self.resetGame()
+
+    def resetGame(self):
+        self.lives = 3
+        self.score = 0
+        self.coins = 0
+        self.level = 1
+        self.paddle = Paddle()
+        self.ball = Ball()
+        self.launched = False
+        self.blocks = makeLevel(1)
+        self.effects = []
+        self.mushrooms = []
+        self.powerTimer = 0
+        self.shake = 0
+        self.ball.attach(self.paddle.getRect())
+
+    def play(self, name):
+        if not self.muted and name in SFX:
+            SFX[name].play()
+
+    def toggleMute(self):
+        self.muted = not self.muted
+        if "music" in SFX:
+            SFX["music"].set_volume(0 if self.muted else 0.35)
+
+    def action(self):
+        if self.state in ("start", "gameover"):
+            self.resetGame()
+            self.state = "playing"
+        elif self.state == "playing" and not self.launched:
+            self.launched = True
+            self.play("launch")
+
+    def handleEvents(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+            elif event.type == pygame.MOUSEMOTION:
+                if self.state == "playing":
+                    self.paddle.setCenter(event.pos[0])
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                self.action()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    self.action()
+                elif event.key == pygame.K_p:
+                    if self.state == "playing":
+                        self.state = "paused"
+                    elif self.state == "paused":
+                        self.state = "playing"
+                elif event.key == pygame.K_m:
+                    self.toggleMute()
+                elif event.key == pygame.K_ESCAPE:
+                    self.running = False
+
+    def updateClouds(self):
+        for c in self.clouds:
+            c[0] += c[2]
+            if c[0] > WIDTH:
+                c[0] = -c[3].get_width()
+
+    def update(self):
+        keys = pygame.key.get_pressed()
+        move = 0
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            move -= 1
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            move += 1
+        self.paddle.move(move)
+
+        if self.powerTimer > 0:
+            self.powerTimer -= 1
+            if self.powerTimer == 0:
+                self.paddle.setWidth(100)
+
+        prect = self.paddle.getRect()
+
+        if not self.launched:
+            self.ball.posx = prect.centerx
+            self.ball.posy = prect.top - self.ball.radius - 1
+        else:
+            self.updateBall(prect)
+
+        self.updateMushrooms(prect)
+
+        for e in self.effects:
+            e.update()
+        self.effects = [e for e in self.effects if e.life > 0]
+
+        if self.shake > 0:
+            self.shake -= 1
+        if self.score > self.highScore:
+            self.highScore = self.score
+
+        if self.state == "playing" and not self.blocks:
+            self.nextLevel()
+
+    def updateBall(self, prect):
+        ball = self.ball
+        ball.update()
+        rect = ball.getRect()
+
+        if (ball.yFac > 0 and rect.colliderect(prect)
+                and ball.posy < prect.centery):
+            ball.bounceOffPaddle(prect)
+            self.play("bounce")
+
+        for block in self.blocks:
+            if rect.colliderect(block.rect):
+                ball.bounceOffBlock(block.rect)
+                self.onBlockHit(block)
+                break
+
+        if ball.posy > GROUND_Y + 12:
+            self.loseLife()
+
+    def onBlockHit(self, block):
+        block.hit()
+        cx, cy = block.rect.center
+
+        if block.kind == "question" and block.health == 1:
+            if random.random() < 0.3:
+                self.mushrooms.append(Mushroom(cx, block.rect.top))
+                self.play("hit")
+            else:
+                self.coins += 1
+                self.score += 100
+                self.effects.append(CoinPop(cx, block.rect.top))
+                self.effects.append(FloatText("100", cx, block.rect.top - 12))
+                self.play("coin")
+            self.shake = 2
+        elif block.isDestroyed():
+            self.score += POINTS[block.kind]
+            self.blocks.remove(block)
+            for _ in range(8):
+                self.effects.append(Debris(cx, cy, DEBRIS_COLORS[block.kind]))
+            self.effects.append(
+                FloatText(str(POINTS[block.kind]), cx, block.rect.top))
+            self.play("break")
+            self.shake = 5
+        else:
+            self.play("hit")
+            self.shake = 2
+
+    def updateMushrooms(self, prect):
+        for m in self.mushrooms[:]:
+            m.update()
+            if m.getRect().colliderect(prect):
+                self.mushrooms.remove(m)
+                self.score += 1000
+                self.powerTimer = 600
+                self.paddle.setWidth(150)
+                self.effects.append(FloatText("1000", m.x, m.y))
+                self.play("powerup")
+            elif m.y > GROUND_Y:
+                self.mushrooms.remove(m)
+
+    def loseLife(self):
+        self.lives -= 1
+        self.powerTimer = 0
+        self.paddle.setWidth(100)
+        self.mushrooms.clear()
+        if self.lives <= 0:
+            saveHighScore(self.highScore)
+            self.state = "gameover"
+            self.play("gameover")
+        else:
+            self.launched = False
+            self.ball.attach(self.paddle.getRect())
+            self.play("lose")
+
+    def nextLevel(self):
+        self.level += 1
+        self.ball.speed = min(5 + (self.level - 1) * 0.5, 9)
+        self.blocks = makeLevel(self.level)
+        self.mushrooms.clear()
+        self.launched = False
+        self.ball.attach(self.paddle.getRect())
+        self.play("clear")
+
+    # ---------------------------------------------------------- drawing
+    def drawHud(self, surf):
+        labels = [("SCORE", 15), ("COINS", 165), ("WORLD", 285),
+                  ("LIVES", 385), ("TOP", 485)]
+        for text, x in labels:
+            drawText(surf, text, smallFont, (255, 230, 120), (x, 3))
+
+        drawText(surf, str(self.score).zfill(6), font, WHITE, (15, 16))
+
+        pygame.draw.ellipse(surf, (255, 215, 40), (165, 19, 10, 14))
+        drawText(surf, "x" + str(self.coins).zfill(2), font, WHITE, (180, 16))
+
+        drawText(surf, "1-" + str(self.level), font, WHITE, (285, 16))
+
+        surf.blit(SPR["mushroom_small"], (385, 15))
+        drawText(surf, "x" + str(self.lives), font, WHITE, (408, 16))
+
+        drawText(surf, str(self.highScore).zfill(6), font, WHITE, (485, 16))
+
+        if self.muted:
+            drawText(surf, "MUTE", smallFont, GRAY, (WIDTH - 45, HEIGHT - 20))
+
+    def drawGroundShadows(self, surf):
+        self.paddle.drawShadow(surf)
+        height = GROUND_Y - self.ball.posy
+        scale = max(0.35, 1 - height / GROUND_Y * 0.7)
+        w = max(6, int(26 * scale))
+        shadow = pygame.Surface((w, 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow, (0, 0, 0, 90), (0, 0, w, 8))
+        if self.ball.posy < GROUND_Y:
+            surf.blit(shadow, (int(self.ball.posx - w / 2), GROUND_Y + 3))
+
+    def drawOverlay(self, surf):
+        blink = (pygame.time.get_ticks() // 500) % 2 == 0
+
+        if self.state == "start":
+            dim(surf, 90)
+            draw3dText(surf, "SUPER", titleFont, (WIDTH // 2, 150),
+                       (255, 220, 60), (150, 50, 10), 6)
+            draw3dText(surf, "BLOCK BREAKER", bigFont, (WIDTH // 2, 225),
+                       (255, 255, 255), (190, 40, 30), 8)
+            if blink:
+                drawText(surf, "TEKAN SPASI / KLIK UNTUK MULAI", midFont,
+                         (255, 230, 120), (WIDTH // 2, 310), center=True)
+            drawText(surf, "PANAH KIRI/KANAN / A D / MOUSE : GERAK", smallFont,
+                     WHITE, (WIDTH // 2, 355), center=True)
+            drawText(surf, "SPASI / KLIK : LUNCURKAN    P : JEDA    M : SUARA",
+                     smallFont, WHITE, (WIDTH // 2, 380), center=True)
+            drawText(surf, "Ambil jamur untuk memperpanjang pipa!", smallFont,
+                     (255, 230, 120), (WIDTH // 2, 410), center=True)
+        elif self.state == "paused":
+            dim(surf, 120)
+            draw3dText(surf, "PAUSE", bigFont, (WIDTH // 2, HEIGHT // 2 - 20),
+                       (255, 255, 255), (60, 60, 160), 8)
+            drawText(surf, "Tekan P untuk lanjut", font, WHITE,
+                     (WIDTH // 2, HEIGHT // 2 + 40), center=True)
+        elif self.state == "gameover":
+            dim(surf, 140)
+            draw3dText(surf, "GAME OVER", bigFont, (WIDTH // 2, 200),
+                       (255, 80, 60), (100, 10, 10), 8)
+            drawText(surf, "SCORE " + str(self.score).zfill(6), midFont, WHITE,
+                     (WIDTH // 2, 270), center=True)
+            if blink:
+                drawText(surf, "TEKAN SPASI UNTUK MAIN LAGI", font,
+                         (255, 230, 120), (WIDTH // 2, 320), center=True)
+        elif self.state == "playing" and not self.launched:
+            if blink:
+                drawText(surf, "TEKAN SPASI / KLIK UNTUK MELUNCURKAN", font,
+                         WHITE, (WIDTH // 2, 340), center=True)
+
+    def draw(self):
+        c = self.canvas
+        c.blit(SPR["bg"], (0, 0))
+        for x, y, speed, sprite in self.clouds:
+            c.blit(sprite, (int(x), y))
+
+        for block in self.blocks:
+            block.draw(c)
+        for m in self.mushrooms:
+            m.draw(c)
+
+        self.paddle.draw(c)
+        self.ball.draw(c, self.launched)
+        for e in self.effects:
+            e.draw(c)
+
+        c.blit(SPR["ground"], (0, GROUND_Y))
+        self.drawGroundShadows(c)
+        self.drawHud(c)
+        self.drawOverlay(c)
+
+        ox = oy = 0
+        if self.shake > 0:
+            ox, oy = random.randint(-2, 2), random.randint(-2, 2)
+        screen.fill(BLACK)
+        screen.blit(c, (ox, oy))
+        pygame.display.flip()
+
+    def run(self):
+        if "music" in SFX:
+            SFX["music"].play(loops=-1)
+        while self.running:
+            self.handleEvents()
+            self.updateClouds()
+            if self.state == "playing":
+                self.update()
+            self.draw()
+            clock.tick(FPS)
+        saveHighScore(self.highScore)
+
+
+def main():
+    # Show a loading text while the sounds are generated
+    screen.fill((70, 130, 250))
+    drawText(screen, "LOADING...", midFont, WHITE,
+             (WIDTH // 2, HEIGHT // 2), center=True)
+    pygame.display.flip()
+
+    buildSprites()
+    SFX.update(buildSounds())
+    Game().run()
+    pygame.quit()
+
+
+if __name__ == "__main__":
+    main()
