@@ -224,3 +224,190 @@ def buildSounds():
     s["music"].set_volume(0.35)
     return s
 # -------------------------------------------------------------- AUDIO END
+
+
+SFX = {}
+SPR = {}
+
+
+# ----------------------------------------------------------------- sprites
+def bevel(w, h, base, light, dark):
+    s = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(s, base, (0, 0, w, h), border_radius=4)
+    pygame.draw.line(s, light, (3, 1), (w - 4, 1), 2)
+    pygame.draw.line(s, light, (1, 3), (1, h - 4), 2)
+    pygame.draw.line(s, dark, (3, h - 2), (w - 4, h - 2), 2)
+    pygame.draw.line(s, dark, (w - 2, 3), (w - 2, h - 4), 2)
+    return s
+
+
+def makeBrick(w, h):
+    s = bevel(w, h, (200, 80, 20), (240, 140, 80), (110, 40, 10))
+    mortar = (90, 35, 10)
+    pygame.draw.line(s, mortar, (3, h // 2), (w - 4, h // 2), 2)
+    pygame.draw.line(s, mortar, (w // 2, 3), (w // 2, h // 2), 2)
+    pygame.draw.line(s, mortar, (w // 4, h // 2), (w // 4, h - 4), 2)
+    pygame.draw.line(s, mortar, (3 * w // 4, h // 2), (3 * w // 4, h - 4), 2)
+    return s
+
+
+def makeQuestion(w, h, used=False):
+    if used:
+        s = bevel(w, h, (150, 100, 50), (190, 140, 90), (80, 50, 20))
+    else:
+        s = bevel(w, h, (250, 185, 50), (255, 235, 150), (170, 100, 10))
+    for (x, y) in [(5, 5), (w - 6, 5), (5, h - 6), (w - 6, h - 6)]:
+        pygame.draw.circle(s, (110, 60, 10), (x, y), 2)
+    if not used:
+        shadow = questionFont.render("?", True, (150, 80, 0))
+        mark = questionFont.render("?", True, WHITE)
+        cx, cy = w // 2, h // 2
+        s.blit(shadow, shadow.get_rect(center=(cx + 1, cy + 1)))
+        s.blit(mark, mark.get_rect(center=(cx, cy)))
+    return s
+
+
+def makeHard(w, h, damage=0):
+    s = bevel(w, h, (140, 140, 150), (215, 215, 225), (60, 60, 75))
+    pygame.draw.rect(s, (105, 105, 118), (6, 5, w - 12, h - 10),
+                     border_radius=2)
+    pygame.draw.rect(s, (70, 70, 85), (6, 5, w - 12, h - 10), 1,
+                     border_radius=2)
+    crack = (40, 40, 50)
+    if damage >= 1:
+        pygame.draw.lines(s, crack, False,
+                          [(w // 3, 2), (w // 3 + 6, h // 3),
+                           (w // 3 - 3, h // 2), (w // 3 + 4, h - 3)], 2)
+    if damage >= 2:
+        pygame.draw.lines(s, crack, False,
+                          [(2 * w // 3, 2), (2 * w // 3 - 6, h // 3),
+                           (2 * w // 3 + 3, 2 * h // 3),
+                           (2 * w // 3 - 4, h - 3)], 2)
+    return s
+
+
+def makeMushroom(size):
+    s = pygame.Surface((size, size), pygame.SRCALPHA)
+    k = size / 26.0
+
+    def P(v):
+        return int(v * k)
+
+    pygame.draw.rect(s, (245, 225, 185), (P(7), P(14), P(12), P(10)),
+                     border_radius=P(4))
+    pygame.draw.rect(s, (200, 170, 120), (P(7), P(14), P(12), P(10)), 1,
+                     border_radius=P(4))
+    pygame.draw.ellipse(s, (200, 25, 25), (P(1), P(1), P(24), P(18)))
+    pygame.draw.ellipse(s, (255, 90, 80), (P(5), P(3), P(9), P(5)))
+    pygame.draw.circle(s, WHITE, (P(7), P(11)), P(3))
+    pygame.draw.circle(s, WHITE, (P(19), P(11)), P(3))
+    pygame.draw.circle(s, WHITE, (P(14), P(7)), P(3))
+    pygame.draw.ellipse(s, (130, 10, 10), (P(1), P(1), P(24), P(18)),
+                        max(1, P(1)))
+    return s
+
+
+def makeBall(radius):
+    d = radius * 2 + 2
+    s = pygame.Surface((d, d), pygame.SRCALPHA)
+    cx = cy = d // 2
+    for r in range(radius, 0, -1):
+        t = 1 - r / radius
+        col = lerpColor((140, 15, 10), (255, 200, 60), t ** 0.8)
+        off = int((radius - r) * 0.35)
+        pygame.draw.circle(s, col, (cx - off, cy - off), r)
+    pygame.draw.circle(s, (255, 255, 230),
+                       (cx - radius // 3, cy - radius // 3),
+                       max(1, radius // 4))
+    return s
+
+
+def makePipe(width, h=24):
+    s = pygame.Surface((width, h), pygame.SRCALPHA)
+    rim = 12
+    for yy in range(h - 4):
+        t = yy / (h - 5)
+        shade = max(0.30, 1.0 - abs(t - 0.30) * 1.4)
+        col = (int(20 + 50 * shade), int(60 + 150 * shade),
+               int(20 + 40 * shade))
+        pygame.draw.line(s, col, (rim - 2, yy + 2), (width - rim + 2, yy + 2))
+    pygame.draw.line(s, (5, 60, 10), (rim - 2, 1), (width - rim + 2, 1))
+    pygame.draw.line(s, (5, 60, 10), (rim - 2, h - 3), (width - rim + 2, h - 3))
+    for x0 in (0, width - rim):
+        pygame.draw.rect(s, (40, 190, 60), (x0, 0, rim, h), border_radius=4)
+        pygame.draw.rect(s, (150, 255, 150), (x0 + 2, 2, 3, h - 4),
+                         border_radius=1)
+        pygame.draw.rect(s, (10, 80, 20), (x0, 0, rim, h), 2,
+                         border_radius=4)
+    return s
+
+
+def makeCloud(scale):
+    w, h = int(110 * scale), int(50 * scale)
+    s = pygame.Surface((w, h), pygame.SRCALPHA)
+    blobs = [(0.28, 0.62, 0.30), (0.5, 0.42, 0.38),
+             (0.72, 0.60, 0.30), (0.5, 0.62, 0.30)]
+    for fx, fy, fr in blobs:
+        pygame.draw.circle(s, (205, 222, 245),
+                           (int(fx * w), int(fy * h) + 3), int(fr * h))
+    for fx, fy, fr in blobs:
+        pygame.draw.circle(s, WHITE, (int(fx * w), int(fy * h)), int(fr * h))
+    return s
+
+
+def drawHill(surf, cx, base, w, h):
+    rect = pygame.Rect(cx - w // 2, base - h, w, h * 2)
+    pygame.draw.ellipse(surf, (20, 110, 30), rect)
+    pygame.draw.ellipse(surf, (40, 160, 50), rect.inflate(-10, -10).move(-4, -3))
+    pygame.draw.ellipse(surf, (95, 210, 90),
+                        pygame.Rect(int(cx - w * 0.28), base - h + 10,
+                                    int(w * 0.30), int(h * 0.35)))
+
+
+def makeBackground():
+    bg = pygame.Surface((WIDTH, HEIGHT))
+    for y in range(HEIGHT):
+        bg.fill(lerpColor((70, 130, 250), (190, 225, 255), y / HEIGHT),
+                (0, y, WIDTH, 1))
+    drawHill(bg, 120, GROUND_Y, 260, 130)
+    drawHill(bg, 470, GROUND_Y, 200, 90)
+    drawHill(bg, 330, GROUND_Y, 120, 55)
+    return bg
+
+
+def makeGround():
+    gh = HEIGHT - GROUND_Y
+    g = pygame.Surface((WIDTH, gh))
+    g.fill((90, 35, 10))
+    tile = makeBrick(30, gh)
+    for x in range(0, WIDTH, 30):
+        g.blit(tile, (x, 0))
+    pygame.draw.line(g, (255, 170, 90), (0, 0), (WIDTH, 0), 2)
+    return g
+
+
+def buildSprites():
+    SPR["brick"] = makeBrick(BLOCK_W, BLOCK_H)
+    SPR["question"] = makeQuestion(BLOCK_W, BLOCK_H, False)
+    SPR["used"] = makeQuestion(BLOCK_W, BLOCK_H, True)
+    SPR["hard"] = [makeHard(BLOCK_W, BLOCK_H, d) for d in range(3)]
+    shadow = pygame.Surface((BLOCK_W, BLOCK_H), pygame.SRCALPHA)
+    pygame.draw.rect(shadow, (0, 0, 0, 70), (0, 0, BLOCK_W, BLOCK_H),
+                     border_radius=4)
+    SPR["shadow"] = shadow
+    SPR["mushroom"] = makeMushroom(26)
+    SPR["mushroom_small"] = makeMushroom(18)
+
+    ball = makeBall(9)
+    SPR["ball"] = ball
+    trail = []
+    for i in range(5):
+        size = int(ball.get_width() * (0.35 + 0.12 * i))
+        t = pygame.transform.smoothscale(ball, (size, size))
+        t.set_alpha(35 + i * 18)
+        trail.append(t)
+    SPR["trail"] = trail
+
+    SPR["bg"] = makeBackground()
+    SPR["ground"] = makeGround()
+    SPR["clouds"] = [makeCloud(1.0), makeCloud(0.7)]
