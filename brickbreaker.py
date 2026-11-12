@@ -411,3 +411,249 @@ def buildSprites():
     SPR["bg"] = makeBackground()
     SPR["ground"] = makeGround()
     SPR["clouds"] = [makeCloud(1.0), makeCloud(0.7)]
+
+    # ----------------------------------------------------------------- objects
+class Paddle:
+    HEIGHT = 24
+    Y = 425
+
+    def __init__(self):
+        self.width = 100
+        self.speed = 9.0
+        self.x = (WIDTH - self.width) / 2
+        self.cache = {}
+
+    def sprites(self):
+        if self.width not in self.cache:
+            shadow = pygame.Surface((self.width, 10), pygame.SRCALPHA)
+            pygame.draw.ellipse(shadow, (0, 0, 0, 80), (0, 0, self.width, 10))
+            self.cache[self.width] = (makePipe(self.width), shadow)
+        return self.cache[self.width]
+
+    def getRect(self):
+        return pygame.Rect(int(self.x), self.Y, self.width, self.HEIGHT)
+
+    def clamp(self):
+        self.x = max(0, min(WIDTH - self.width, self.x))
+
+    def move(self, direction):
+        self.x += direction * self.speed
+        self.clamp()
+
+    def setCenter(self, cx):
+        self.x = cx - self.width / 2
+        self.clamp()
+
+    def setWidth(self, w):
+        cx = self.x + self.width / 2
+        self.width = w
+        self.x = cx - w / 2
+        self.clamp()
+
+    def draw(self, surf):
+        surf.blit(self.sprites()[0], (int(self.x), self.Y))
+
+    def drawShadow(self, surf):
+        surf.blit(self.sprites()[1], (int(self.x), GROUND_Y + 2))
+
+
+class Block:
+    HEALTH = {"brick": 1, "question": 2, "hard": 3}
+
+    def __init__(self, x, y, kind):
+        self.rect = pygame.Rect(x, y, BLOCK_W, BLOCK_H)
+        self.kind = kind
+        self.health = self.HEALTH[kind]
+
+    def sprite(self):
+        if self.kind == "brick":
+            return SPR["brick"]
+        if self.kind == "question":
+            return SPR["question"] if self.health == 2 else SPR["used"]
+        return SPR["hard"][3 - self.health]
+
+    def hit(self):
+        self.health -= 1
+
+    def isDestroyed(self):
+        return self.health <= 0
+
+    def draw(self, surf):
+        surf.blit(SPR["shadow"], (self.rect.x + 4, self.rect.y + 5))
+        surf.blit(self.sprite(), self.rect)
+
+
+class Ball:
+    def __init__(self):
+        self.radius = 9
+        self.speed = 5.0
+        self.posx = self.posy = 0.0
+        self.xFac, self.yFac = 0.7, -1
+        self.trail = []
+
+    def attach(self, prect):
+        self.posx = prect.centerx
+        self.posy = prect.top - self.radius - 1
+        self.xFac = random.choice([-0.7, 0.7])
+        self.yFac = -1
+        self.trail = []
+
+    def update(self):
+        self.trail.append((self.posx, self.posy))
+        self.trail = self.trail[-5:]
+
+        self.posx += self.xFac * self.speed
+        self.posy += self.yFac * self.speed
+
+        if self.posx <= self.radius:
+            self.posx = self.radius
+            self.xFac = abs(self.xFac)
+        elif self.posx >= WIDTH - self.radius:
+            self.posx = WIDTH - self.radius
+            self.xFac = -abs(self.xFac)
+
+        if self.posy <= TOP + self.radius:
+            self.posy = TOP + self.radius
+            self.yFac = abs(self.yFac)
+
+    def getRect(self):
+        return pygame.Rect(int(self.posx - self.radius),
+                           int(self.posy - self.radius),
+                           self.radius * 2, self.radius * 2)
+
+    # Bounce angle depends on where the ball hits the pipe
+    def bounceOffPaddle(self, prect):
+        offset = (self.posx - prect.centerx) / (prect.width / 2)
+        offset = max(-1, min(1, offset))
+        self.xFac = offset * 1.3
+        if abs(self.xFac) < 0.2:
+            self.xFac = 0.2 if self.xFac >= 0 else -0.2
+        self.yFac = -1
+        self.posy = prect.top - self.radius - 1
+
+    # Bounce on the side that was hit and push the ball out of the block
+    def bounceOffBlock(self, brect):
+        r = self.getRect()
+        overlapX = min(r.right, brect.right) - max(r.left, brect.left)
+        overlapY = min(r.bottom, brect.bottom) - max(r.top, brect.top)
+        if overlapX < overlapY:
+            if r.centerx < brect.centerx:
+                self.posx -= overlapX
+            else:
+                self.posx += overlapX
+            self.xFac *= -1
+        else:
+            if r.centery < brect.centery:
+                self.posy -= overlapY
+            else:
+                self.posy += overlapY
+            self.yFac *= -1
+
+    def draw(self, surf, launched):
+        if launched:
+            for i, (tx, ty) in enumerate(self.trail):
+                spr = SPR["trail"][i]
+                surf.blit(spr, (tx - spr.get_width() / 2,
+                                ty - spr.get_height() / 2))
+        spr = SPR["ball"]
+        surf.blit(spr, (self.posx - spr.get_width() / 2,
+                        self.posy - spr.get_height() / 2))
+
+
+class Mushroom:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+        self.vy = -3.0
+
+    def update(self):
+        self.vy = min(3.5, self.vy + 0.12)
+        self.y += self.vy
+
+    def getRect(self):
+        return pygame.Rect(int(self.x - 13), int(self.y - 13), 26, 26)
+
+    def draw(self, surf):
+        surf.blit(SPR["mushroom"], self.getRect())
+
+
+class Debris:
+    def __init__(self, x, y, color):
+        self.x, self.y = x, y
+        self.vx = random.uniform(-3, 3)
+        self.vy = random.uniform(-6, -2)
+        self.life = 40
+        self.color = color
+        self.size = random.randint(3, 6)
+
+    def update(self):
+        self.vy += 0.35
+        self.x += self.vx
+        self.y += self.vy
+        self.life -= 1
+
+    def draw(self, surf):
+        pygame.draw.rect(surf, self.color,
+                         (int(self.x), int(self.y), self.size, self.size))
+
+
+class CoinPop:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+        self.vy = -7.0
+        self.age = 0
+        self.life = 36
+
+    def update(self):
+        self.vy += 0.3
+        self.y += self.vy
+        self.age += 1
+        self.life -= 1
+
+    def draw(self, surf):
+        w = max(3, int(12 * abs(math.cos(self.age * 0.5))))
+        rect = pygame.Rect(0, 0, w, 18)
+        rect.center = (int(self.x), int(self.y))
+        pygame.draw.ellipse(surf, (160, 110, 0), rect.inflate(2, 2))
+        pygame.draw.ellipse(surf, (255, 215, 40), rect)
+        pygame.draw.line(surf, (255, 245, 170),
+                         (rect.centerx, rect.top + 3),
+                         (rect.centerx, rect.bottom - 3), 1)
+
+
+class FloatText:
+    def __init__(self, text, x, y):
+        self.text = text
+        self.x, self.y = x, y
+        self.life = 40
+
+    def update(self):
+        self.y -= 1
+        self.life -= 1
+
+    def draw(self, surf):
+        drawText(surf, self.text, smallFont, WHITE,
+                 (int(self.x), int(self.y)), center=True)
+
+
+# ------------------------------------------------------------------ levels
+def makeLevel(level):
+    blocks = []
+    weightHard = min(8 + level * 4, 35)
+    weightQuestion = 16
+    weightBrick = 100 - weightHard - weightQuestion
+    for row in range(6):
+        for col in range(10):
+            if random.random() < 0.06:
+                continue
+            kind = random.choices(["brick", "question", "hard"],
+                                  weights=[weightBrick, weightQuestion,
+                                           weightHard])[0]
+            blocks.append(Block(3 + col * 60, 50 + row * 30, kind))
+    if not blocks:
+        blocks.append(Block(3, 50, "brick"))
+    return blocks
+
+
+DEBRIS_COLORS = {"brick": (200, 80, 20), "question": (250, 185, 50),
+                 "hard": (140, 140, 150)}
+POINTS = {"brick": 10, "question": 50, "hard": 30}
